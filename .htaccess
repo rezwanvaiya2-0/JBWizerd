@@ -1,0 +1,31 @@
+# ============================================================
+# JBWizerd Panel - Security hardening
+# ============================================================
+
+# --- Disable directory listing ---
+Options -Indexes
+
+# --- Security headers ---
+<IfModule mod_headers.c>
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "same-origin"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
+</IfModule>
+
+# --- Block sensitive files from direct web access ---
+# install.sql, README, composer files, log files, git metadata, etc.
+<FilesMatch "^(install\.sql|README(\.md)?|composer\.(json|lock)|cli-reset-password\.php|\.git(ignore)?|.*\.log|.*\.bak|.*\.swp|.*\.orig)$">
+    Require all denied
+</FilesMatch>
+
+# --- Block all hidden/dot files (.git, .htaccess, .DS_Store, etc.) ---
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# --- Block editor/temp backup files ---
+<FilesMatch "\.(bak|swp|old|orig|~)$">
+    Require all denied
+</FilesMatch>

@@ -1,0 +1,5 @@
+# Block execution / direct access to PHP files under assets/
+# Prevents any uploaded or tampered file in assets/ from running as PHP.
+<FilesMatch "\.(php|phtml|php[0-9]|phar)$">
+    Require all denied
+</FilesMatch>
