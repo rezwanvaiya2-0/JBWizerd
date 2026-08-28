@@ -70,6 +70,41 @@ Requirements: PHP 7.4+, PDO MySQL, cURL (all standard on shared hosting).
 
 If you installed in a subfolder, add the subfolder to the path (e.g. `/home/USER/public_html/panel/cron/send-webhooks.php`). You can also copy the exact commands from the **Cron Status** page inside the panel — it pre-fills the real path for you.
 
+### Option C — Docker (panel + MySQL in containers)
+
+A `Dockerfile` and `docker-compose.yml` are included for running the whole panel in containers:
+
+1. Set your registration key in `docker-compose.yml` (`JBWIZERD_REGISTRATION_KEY`).
+2. Build and start:
+   ```bash
+   docker compose up -d --build
+   ```
+3. Open `http://localhost:8080/setup.php`. The installer's DB details are pre-filled by the container (host `db`, db `jbwizerd`, user `jbuser`, pass `jbpass`).
+4. Finish the wizard (create tables → admin user), then connect your JetBackup servers as in Part 2.
+
+**How it works**
+
+- `Dockerfile` — PHP 8.2 + Apache with `pdo_mysql`, `curl`, `mbstring`, `zip`; enables `rewrite`/`headers` (needed for the `.htaccess` security rules) and passes the `Authorization` header through to PHP so the hook's Bearer token auth works.
+- `docker/docker-entrypoint.sh` — writes `includes/config.php` automatically from environment variables (DB, panel URL, registration key, timezone, retention, security), installs the cron jobs (webhook sender every minute, retention cleanup daily at 03:00), then starts Apache.
+- `docker-compose.yml` — MySQL 8.0 service with a healthcheck, pre-seeded from `install.sql`, plus the web service.
+
+**Environment variables** (all optional — sensible defaults are used):
+
+| Variable | Default |
+|---|---|
+| `JBWIZERD_DB_HOST` | `db` |
+| `JBWIZERD_DB_NAME` | `jbwizerd` |
+| `JBWIZERD_DB_USER` | `jbuser` |
+| `JBWIZERD_DB_PASS` | `jbpass` |
+| `JBWIZERD_PANEL_URL` | `http://localhost:8080` |
+| `JBWIZERD_REGISTRATION_KEY` | *(required — set it)* |
+| `JBWIZERD_TIMEZONE` | `Asia/Dhaka` |
+| `JBWIZERD_RETENTION_DAYS` | `365` |
+| `JBWIZERD_STUCK_BACKUP_HOURS` | `24` |
+| `JBWIZERD_SESSION_LIFETIME` | `7200` |
+
+> Note: the container binds port `80` internally; the host port `8080` is configurable in `docker-compose.yml`. If `includes/config.php` already exists (e.g. copied in), the entrypoint leaves it untouched.
+
 The cleanup cron keeps:
 - **1 year** of backup data (`RETENTION_DAYS`, default 365)
 - **90 days** of webhook logs (`WEBHOOK_LOG_RETENTION_DAYS`)

@@ -1,0 +1,59 @@
+# ============================================================
+# JBWizerd Panel — docker-compose
+#
+#   docker compose up -d --build
+#
+#   Web:  http://localhost:8080   (setup.php runs first-time)
+#   DB:   mysql://jbuser:jbpass@db:3306/jbwizerd
+#
+# After startup, open http://localhost:8080/setup.php and point the
+# installer at:
+#   DB_HOST = db        (the compose service name, not "localhost")
+#   DB_NAME = jbwizerd
+#   DB_USER = jbuser
+#   DB_PASS = jbpass
+# ============================================================
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: jbwizerd_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: jbwizerd
+      MYSQL_USER: jbuser
+      MYSQL_PASSWORD: jbpass
+    volumes:
+      - db_data:/var/lib/mysql
+      # Optionally pre-seed the schema on first boot:
+      - ./install.sql:/docker-entrypoint-initdb.d/01-install.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    container_name: jbwizerd_web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # These are used by docker-entrypoint.sh to write includes/config.php
+      # automatically. Override with your own values.
+      JBWIZERD_DB_HOST: db
+      JBWIZERD_DB_NAME: jbwizerd
+      JBWIZERD_DB_USER: jbuser
+      JBWIZERD_DB_PASS: jbpass
+      JBWIZERD_PANEL_URL: http://localhost:8080
+      JBWIZERD_REGISTRATION_KEY: YOUR-REGISTRATION-KEY-HERE
+      JBWIZERD_TIMEZONE: Asia/Dhaka
+      # Port inside the container is always 80; the host port is below.
+    ports:
+      - "8080:80"
+
+volumes:
+  db_data:

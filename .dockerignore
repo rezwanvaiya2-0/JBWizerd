@@ -1,0 +1,11 @@
+# Exclude from the Docker build context
+.git
+.gitignore
+.DS_Store
+docker-compose.yml
+Dockerfile
+README.md
+JBWizerd.jpg
+*.log
+cron/cron-status.json
+includes/config.php
