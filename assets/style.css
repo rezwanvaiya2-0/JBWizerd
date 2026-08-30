@@ -588,10 +588,12 @@ hr{border:0;border-top:1px solid var(--border);margin:20px 0}
 }
 .setup-card{max-width:560px;text-align:left}
 .login-logo{
-  width:auto;height:38px;max-width:72%;margin:0 auto 10px;display:block;
+  width:auto;height:48px;max-width:80%;margin:0 auto 12px;display:block;
   object-fit:contain;
   filter:drop-shadow(0 4px 12px rgba(91,155,239,.25))
 }
+/* Setup card is wider — give the logo a bit more presence */
+.setup-card .login-logo{height:56px;max-width:85%;margin:0 auto 16px}
 .login-card h1,.setup-card h1{font-size:1.2em;margin-bottom:4px;text-align:center}
 .login-card .form{margin-top:20px;text-align:left}
 .setup-card h2{font-size:1.05em;margin:10px 0 4px}
