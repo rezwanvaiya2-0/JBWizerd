@@ -51,7 +51,6 @@ CREATE TABLE IF NOT EXISTS backups (
 CREATE TABLE IF NOT EXISTS webhooks (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     url VARCHAR(500) NOT NULL,
-    events SET('backup_failed','backup_partial','backup_completed') NOT NULL DEFAULT 'backup_failed',
     format VARCHAR(20) NOT NULL DEFAULT 'generic',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     last_triggered_at DATETIME DEFAULT NULL,

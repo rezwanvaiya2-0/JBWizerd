@@ -30,8 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (filter_var($url, FILTER_VALIDATE_URL) === false) {
             flash('error', 'Please enter a valid webhook URL.');
         } else {
-            $events = [WEBHOOK_EVENT_FAILED, WEBHOOK_EVENT_PARTIAL, WEBHOOK_EVENT_COMPLETED];
-            db_query('INSERT INTO webhooks (url, events, format, is_active, created_at) VALUES (?, ?, ?, 1, NOW())', [$url, implode(',', $events), $format]);
+            db_query('INSERT INTO webhooks (url, format, is_active, created_at) VALUES (?, ?, 1, NOW())', [$url, $format]);
             audit('webhook_add', 'Webhook "' . $url . '" added');
             flash('success', 'Webhook added.');
         }

@@ -17,20 +17,11 @@ define('WEBHOOK_EVENT_PARTIAL', 'backup_partial');
 define('WEBHOOK_EVENT_COMPLETED', 'backup_completed');
 define('WEBHOOK_EVENT_STUCK', 'backup_stuck');
 
-function event_enabled(array $webhook, string $event): bool
-{
-    // Event selection was removed — every active webhook receives every event.
-    return true;
-}
-
 function queue_webhook(string $event, array $data): void
 {
     $rows = db_query('SELECT * FROM webhooks WHERE is_active = 1')->fetchAll();
     $payload = json_encode(['event' => $event] + $data, JSON_UNESCAPED_SLASHES);
     foreach ($rows as $hook) {
-        if (!event_enabled($hook, $event)) {
-            continue;
-        }
         db_query(
             'INSERT INTO webhook_queue (webhook_id, event, payload, status, attempts, next_attempt_at, created_at)
              VALUES (?, ?, ?, "pending", 0, NOW(), NOW())',
@@ -47,9 +38,19 @@ function process_webhook_queue(int $limit = 10): void
          ORDER BY id ASC LIMIT ' . (int)$limit
     )->fetchAll();
 
+    if (!$rows) {
+        return;
+    }
+
+    // Pre-load all active webhooks into a map (avoids N+1 queries)
+    $hooks = [];
+    foreach (db_query('SELECT * FROM webhooks WHERE is_active = 1')->fetchAll() as $h) {
+        $hooks[(int)$h['id']] = $h;
+    }
+
     foreach ($rows as $item) {
-        $hook = db_query('SELECT * FROM webhooks WHERE id = ? LIMIT 1', [(int)$item['webhook_id']])->fetch();
-        if (!$hook || (int)$hook['is_active'] !== 1) {
+        $hook = $hooks[(int)$item['webhook_id']] ?? null;
+        if (!$hook) {
             db_query('UPDATE webhook_queue SET status = "failed" WHERE id = ?', [(int)$item['id']]);
             continue;
         }
@@ -57,14 +58,19 @@ function process_webhook_queue(int $limit = 10): void
         $attempt = (int)$item['attempts'] + 1;
         $result = send_webhook_to_url($hook['url'], $item['payload'], $hook['format'] ?? 'generic');
 
+        // Pull server name + users from the payload for the delivery log
+        $pl = json_decode($item['payload'], true);
+        $logServer = is_array($pl) ? ($pl['server_name'] ?? $pl['server'] ?? null) : null;
+        $logUsers  = is_array($pl) ? ($pl['cpanel_user'] ?? null) : null;
+
         db_query(
             'INSERT INTO webhook_logs (webhook_id, event, server_name, cpanel_user, status, http_status, response, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
             [
                 (int)$hook['id'],
                 $item['event'],
-                null,
-                null,
+                $logServer,
+                $logUsers,
                 $result['ok'] ? 'success' : 'failed',
                 $result['http_status'],
                 $result['ok'] ? '' : mb_substr($result['error'], 0, 500),
@@ -198,7 +204,8 @@ function format_discord(array $data): string
 
     $fields = [];
     if ($status === 'stuck') {
-        $fields[] = ['name' => 'URGENT', 'value' => '⚠ Backup has been running for over 24 hours without completing. Check it manually.', 'inline' => false];
+        $stuckHours = defined('STUCK_BACKUP_HOURS') ? (int)STUCK_BACKUP_HOURS : 24;
+        $fields[] = ['name' => 'URGENT', 'value' => '⚠ Backup has been running for over ' . $stuckHours . ' hours without completing. Check it manually.', 'inline' => false];
     }
     $fields[] = ['name' => 'Server', 'value' => ($data['server'] ?? '—'), 'inline' => true];
     if (!empty($data['server_ip'])) {
@@ -207,7 +214,7 @@ function format_discord(array $data): string
     if ($status !== 'success' && ($data['event'] ?? '') !== 'backup_stuck' && !empty($data['cpanel_user'])) {
         $fields[] = ['name' => 'cPanel User', 'value' => $data['cpanel_user'], 'inline' => true];
     }
-    $fields[] = ['name' => 'Destination', 'value' => ($data['destination'] ?: '—'), 'inline' => true];
+    $fields[] = ['name' => 'Destination', 'value' => ($data['destination'] ?? '') ?: '—', 'inline' => true];
     if (!empty($data['disk_used']) && !empty($data['disk_total'])) {
         $storage = ($data['disk_used'] ?? '') . ' used / ' . ($data['disk_total'] ?? '') . ' total';
         if (!empty($data['disk_free'])) {
@@ -220,7 +227,7 @@ function format_discord(array $data): string
     }
     $fields[] = ['name' => 'Started', 'value' => fmt_dt($data['start_time'] ?? null), 'inline' => true];
     $fields[] = ['name' => 'Ended', 'value' => fmt_dt($data['end_time'] ?? null), 'inline' => true];
-    $fields[] = ['name' => 'Duration', 'value' => ($data['duration'] ?: '—'), 'inline' => true];
+    $fields[] = ['name' => 'Duration', 'value' => ($data['duration'] ?? '') ?: '—', 'inline' => true];
 
     if (!empty($data['error_log'])) {
         $fields[] = ['name' => 'Error Log', 'value' => '```' . mb_substr(error_log_webhook($data['error_log']), 0, 1000) . '```', 'inline' => false];
@@ -260,7 +267,8 @@ function format_slack(array $data): string
 
     $text = "*$label*";
     if ($status === 'stuck') {
-        $text .= "\n:warning: *Backup has been running for over 24 hours without completing. Check it manually.*";
+        $stuckHours = defined('STUCK_BACKUP_HOURS') ? (int)STUCK_BACKUP_HOURS : 24;
+        $text .= "\n:warning: *Backup has been running for over " . $stuckHours . " hours without completing. Check it manually.*";
     }
     $text .= "\n*Server:* " . ($data['server'] ?? '—');
     if (!empty($data['server_ip'])) {
