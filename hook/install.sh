@@ -12,11 +12,15 @@
 #   Update/replace an existing key on an already-installed server:
 #     bash install.sh --panel-url https://panel.example.com --update-key XXXX-XXXX-XXXX-XXXX
 #
+#   Update ONLY the hook script (keep existing config.json — no key needed):
+#     bash install.sh --panel-url https://panel.example.com --update-script
+#
 # Flags:
 #   --panel-url    <URL>     Panel address (https://panel.example.com)
 #   --register-key <KEY>     Panel registration key (auto-register)
 #   --token        <KEY>     Direct server key
 #   --update-key   <KEY>     Replace the key in config.json
+#   --update-script          Re-download jb_hook.py only (keep config.json)
 #   --hostname     <NAME>    Override server name sent to the panel
 # ============================================================
 
@@ -31,6 +35,7 @@ PANEL_URL=""
 REGISTER_KEY=""
 TOKEN=""
 UPDATE_KEY=""
+UPDATE_SCRIPT=""
 HOSTNAME_OVERRIDE=""
 
 # --- Parse flags ---
@@ -40,9 +45,10 @@ while [ $# -gt 0 ]; do
     --register-key) REGISTER_KEY="$2"; shift 2 ;;
     --token)        TOKEN="$2"; shift 2 ;;
     --update-key)   UPDATE_KEY="$2"; shift 2 ;;
+    --update-script) UPDATE_SCRIPT="1"; shift ;;
     --hostname)     HOSTNAME_OVERRIDE="$2"; shift 2 ;;
     --help|-h)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,28p'; exit 0 ;;
+      grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,32p'; exit 0 ;;
     *) echo "Unknown option: $1 (use --help)"; exit 1 ;;
   esac
 done
@@ -52,6 +58,26 @@ if [ -z "$PANEL_URL" ]; then
   exit 1
 fi
 PANEL_URL="${PANEL_URL%/}"
+
+# --- Update script mode: just re-download jb_hook.py, keep config.json ---
+if [ -n "$UPDATE_SCRIPT" ]; then
+  echo "Updating hook script to $INSTALL_DIR/jb_hook.py ..."
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "WARNING: $CONFIG_FILE not found — only updating the script."
+  fi
+  if [ -f "$HOOK_SOURCE" ]; then
+    cp "$HOOK_SOURCE" "$INSTALL_DIR/jb_hook.py"
+  else
+    curl -s -m 20 -o "$INSTALL_DIR/jb_hook.py" "$PANEL_URL/hook/jb_hook.py" || {
+      echo "ERROR: could not download jb_hook.py from $PANEL_URL/hook/jb_hook.py"
+      exit 1
+    }
+  fi
+  chmod +x "$INSTALL_DIR/jb_hook.py"
+  echo "Script updated. Config (config.json) untouched — the existing key still works."
+  echo "NOTE: JetBackup hooks keep running automatically — no restart needed."
+  exit 0
+fi
 
 # --- Update key mode: just rewrite config.json ---
 if [ -n "$UPDATE_KEY" ]; then
