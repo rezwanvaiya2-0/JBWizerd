@@ -183,8 +183,12 @@ def call_jb_api(function, params=''):
         cmd = [cli, '-F', function]
         if params:
             cmd += ['-D', params]
-        out = subprocess.run(cmd, capture_output=True, timeout=30, text=True).stdout
-        if not out or not out.strip():
+        # capture_output/text are Python 3.7+; use PIPE + manual decode so this
+        # works on older Pythons (3.6 and earlier) found on some cPanel servers.
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, err = proc.communicate(timeout=30)
+        out = out.decode('utf-8', errors='replace').strip()
+        if not out:
             return {}
         return parse_jb_response(out)
     except Exception as e:
