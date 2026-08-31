@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS webhook_queue (
     webhook_id INT UNSIGNED NOT NULL,
     event VARCHAR(50) NOT NULL,
     payload MEDIUMTEXT DEFAULT NULL,
-    status ENUM('pending','success','failed') NOT NULL DEFAULT 'pending',
+    status ENUM('pending','sending','success','failed') NOT NULL DEFAULT 'pending',
     attempts INT UNSIGNED NOT NULL DEFAULT 0,
     last_error TEXT DEFAULT NULL,
     next_attempt_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

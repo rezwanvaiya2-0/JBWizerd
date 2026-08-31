@@ -435,22 +435,29 @@ def get_backup_report():
 # ============================================================
 
 def find_recent_logs(max_age_hours=RECENT_LOG_WINDOW_HOURS, limit=MAX_LOGS_TO_CHECK):
-    """Return the most recently modified JetBackup queue .log files."""
+    """Return the most recently modified JetBackup queue .log files.
+    Only scans the top-level queue directory (group-level logs like
+    1_<groupid>.log), NOT item subdirectories — so the backup_id derived
+    from the filename always matches the API group _id."""
     if not os.path.isdir(JB_QUEUE_LOG_DIR):
         return []
     logs = []
     now = time.time()
-    for dirpath, _dirnames, filenames in os.walk(JB_QUEUE_LOG_DIR):
-        for fn in filenames:
+    try:
+        for fn in os.listdir(JB_QUEUE_LOG_DIR):
             if not fn.endswith('.log'):
                 continue
-            p = os.path.join(dirpath, fn)
+            p = os.path.join(JB_QUEUE_LOG_DIR, fn)
+            if not os.path.isfile(p):
+                continue
             try:
                 mtime = os.path.getmtime(p)
                 if now - mtime <= max_age_hours * 3600:
                     logs.append((mtime, p))
             except Exception:
                 pass
+    except Exception:
+        pass
     logs.sort(reverse=True)
     return [p for _m, p in logs[:limit]]
 

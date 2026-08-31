@@ -122,50 +122,60 @@ if ($status === 'running') {
         $backupRowId = (int)db()->lastInsertId();
     }
 } else {
+    // Final status: match an existing row by backup_id first, then fall back
+    // to the newest ROW for this server (any status) so a Pre-hook "running"
+    // row is ALWAYS found — regardless of cpanel_user (the running row has an
+    // empty user; the final partial/failed report has users). This prevents
+    // duplicate rows + duplicate webhooks.
     $existing = null;
     if ($backupId !== null && $backupId !== '') {
         $stmt = db_query(
-            'SELECT id, error_log FROM backups WHERE server_id = ? AND backup_id = ? ORDER BY id DESC LIMIT 1',
+            'SELECT id, error_log, webhook_sent FROM backups WHERE server_id = ? AND backup_id = ? ORDER BY id DESC LIMIT 1',
             [$serverId, $backupId]
+        );
+        $existing = $stmt->fetch();
+    }
+    if (empty($existing)) {
+        // Any recent running row for this server (no user filter!) — this is
+        // the Pre-hook row we must finalize, never duplicate it.
+        $stmt = db_query(
+            "SELECT id, error_log, webhook_sent FROM backups WHERE server_id = ? AND status = 'running' ORDER BY id DESC LIMIT 1",
+            [$serverId]
+        );
+        $existing = $stmt->fetch();
+    }
+    if (empty($existing) && $startTime !== null && $startTime !== '') {
+        // Last resort: match by server + start_time (same job always has the
+        // same start time, even if a prior delivery already changed status or
+        // backup_id differed). Window ±2h covers clock skew across retries.
+        $stmt = db_query(
+            'SELECT id, error_log, webhook_sent FROM backups
+             WHERE server_id = ? AND start_time BETWEEN ? AND ?
+             ORDER BY id DESC LIMIT 1',
+            [$serverId, date('Y-m-d H:i:s', strtotime($startTime) - 7200), date('Y-m-d H:i:s', strtotime($startTime) + 7200)]
         );
         $existing = $stmt->fetch();
     }
 
     if (!empty($existing)) {
+        $wasSent = (int)($existing['webhook_sent'] ?? 0);
         db_query(
-            'UPDATE backups SET status = ?, end_time = ?, error = ?, error_log = ?, payload = ?, server_name = ?, destination = ?, cpanel_user = ?, disk_used = ?, disk_free = ?, disk_total = ?, disk_used_pct = ?, duration = ?, progress = ? WHERE id = ?',
-            [$status, $endTime ?: now(), $error, $errorLog !== '' ? $errorLog : ($existing['error_log'] ?? null), json_encode($body, JSON_UNESCAPED_SLASHES), $serverName, $destination, $cpanelUser, $diskUsed, $diskFree, $diskTotal, $diskPct, $duration, $progress, (int)$existing['id']]
+            'UPDATE backups SET status = ?, end_time = ?, error = ?, error_log = ?, payload = ?, server_name = ?, destination = ?, cpanel_user = ?, disk_used = ?, disk_free = ?, disk_total = ?, disk_used_pct = ?, duration = ?, progress = ?, backup_id = ? WHERE id = ?',
+            [$status, $endTime ?: now(), $error, $errorLog !== '' ? $errorLog : ($existing['error_log'] ?? null), json_encode($body, JSON_UNESCAPED_SLASHES), $serverName, $destination, $cpanelUser, $diskUsed, $diskFree, $diskTotal, $diskPct, $duration, $progress, $backupId, (int)$existing['id']]
         );
         $backupRowId = (int)$existing['id'];
+        // If this row was already webhooked by an earlier delivery, keep that flag
+        // so we do NOT send a duplicate. (Re-fetch below reads webhook_sent.)
+        if ($wasSent) {
+            db_query('UPDATE backups SET webhook_sent = 1 WHERE id = ?', [$backupRowId]);
+        }
     } else {
-        $params = [$status, $endTime ?: now(), $error, $errorLog !== '' ? $errorLog : null, json_encode($body, JSON_UNESCAPED_SLASHES), $serverName, $destination, $cpanelUser, $diskUsed, $diskFree, $diskTotal, $diskPct, $duration, $progress, $serverId];
-        $userClause = '';
-        $selectParams = [$serverId];
-        if ($cpanelUser !== '') {
-            $userClause = ' AND cpanel_user = ?';
-            $params[] = $cpanelUser;
-            $selectParams[] = $cpanelUser;
-        }
-        $stmt = db_query(
-            "SELECT id FROM backups WHERE server_id = ? AND status = 'running' $userClause ORDER BY id DESC LIMIT 1",
-            $selectParams
+        db_query(
+            'INSERT INTO backups (server_id, backup_id, server_name, cpanel_user, destination, status, start_time, end_time, error, error_log, payload, disk_used, disk_free, disk_total, disk_used_pct, duration, progress, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+            [$serverId, $backupId, $serverName, $cpanelUser, $destination, $status, $startTime, $endTime ?: now(), $error, $errorLog, json_encode($body, JSON_UNESCAPED_SLASHES), $diskUsed, $diskFree, $diskTotal, $diskPct, $duration, $progress]
         );
-        $matched = $stmt->fetch();
-
-        if ($matched) {
-            db_query(
-                "UPDATE backups SET status = ?, end_time = ?, error = ?, error_log = ?, payload = ?, server_name = ?, destination = ?, cpanel_user = ?, disk_used = ?, disk_free = ?, disk_total = ?, disk_used_pct = ?, duration = ?, progress = ? WHERE server_id = ? AND status = 'running' $userClause",
-                $params
-            );
-            $backupRowId = (int)$matched['id'];
-        } else {
-            db_query(
-                'INSERT INTO backups (server_id, backup_id, server_name, cpanel_user, destination, status, start_time, end_time, error, error_log, payload, disk_used, disk_free, disk_total, disk_used_pct, duration, progress, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-                [$serverId, $backupId, $serverName, $cpanelUser, $destination, $status, $startTime, $endTime ?: now(), $error, $errorLog, json_encode($body, JSON_UNESCAPED_SLASHES), $diskUsed, $diskFree, $diskTotal, $diskPct, $duration, $progress]
-            );
-            $backupRowId = (int)db()->lastInsertId();
-        }
+        $backupRowId = (int)db()->lastInsertId();
     }
 }
 
@@ -183,9 +193,25 @@ if ($backup) {
         $shouldSend = true;
         $event = WEBHOOK_EVENT_COMPLETED;
     }
-    if ($shouldSend && !$backup['webhook_sent']) {
-        queue_webhook($event, build_webhook_data($backup, $server));
-        db_query('UPDATE backups SET webhook_sent = 1 WHERE id = ?', [(int)$backup['id']]);
+    // Global dedupe: if ANY row for this server+backup_id was already
+    // webhooked, skip — protects against duplicate rows/deliveries.
+    if ($shouldSend) {
+        $alreadySent = (int)$backup['webhook_sent'];
+        if (!$alreadySent && $backupId !== null && $backupId !== '') {
+            $c = db_query(
+                'SELECT COUNT(*) AS c FROM backups WHERE server_id = ? AND backup_id = ? AND webhook_sent = 1',
+                [$serverId, $backupId]
+            )->fetch()['c'];
+            $alreadySent = (int)$c > 0;
+        }
+        if (!$alreadySent) {
+            queue_webhook($event, build_webhook_data($backup, $server));
+            db_query('UPDATE backups SET webhook_sent = 1 WHERE id = ?', [(int)$backup['id']]);
+            // Mark every row sharing this backup_id as sent (kills duplicates)
+            if ($backupId !== null && $backupId !== '') {
+                db_query('UPDATE backups SET webhook_sent = 1 WHERE server_id = ? AND backup_id = ?', [$serverId, $backupId]);
+            }
+        }
     }
 }
 

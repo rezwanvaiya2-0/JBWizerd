@@ -55,6 +55,13 @@ function process_webhook_queue(int $limit = 10): void
             continue;
         }
 
+        // Atomic claim: only one process sends this row (kills race conditions
+        // between report.php immediate delivery and cron/send-webhooks.php).
+        $claimed = db_query('UPDATE webhook_queue SET status = "sending" WHERE id = ? AND status = "pending"', [(int)$item['id']])->rowCount();
+        if ($claimed === 0) {
+            continue; // another process already claimed it
+        }
+
         $attempt = (int)$item['attempts'] + 1;
         $result = send_webhook_to_url($hook['url'], $item['payload'], $hook['format'] ?? 'generic');
 
@@ -84,7 +91,7 @@ function process_webhook_queue(int $limit = 10): void
             db_query('UPDATE webhook_queue SET status = "failed", attempts = ?, last_error = ?, next_attempt_at = NOW() WHERE id = ?', [$attempt, mb_substr($result['error'], 0, 500), (int)$item['id']]);
         } else {
             $backoff = min(3600, 60 * $attempt * $attempt);
-            db_query('UPDATE webhook_queue SET attempts = ?, last_error = ?, next_attempt_at = DATE_ADD(NOW(), INTERVAL ? SECOND) WHERE id = ?', [$attempt, mb_substr($result['error'], 0, 500), $backoff, (int)$item['id']]);
+            db_query('UPDATE webhook_queue SET status = "pending", attempts = ?, last_error = ?, next_attempt_at = DATE_ADD(NOW(), INTERVAL ? SECOND) WHERE id = ?', [$attempt, mb_substr($result['error'], 0, 500), $backoff, (int)$item['id']]);
         }
     }
 }
