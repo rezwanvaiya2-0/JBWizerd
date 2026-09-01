@@ -420,23 +420,27 @@ def get_backup_report():
                 st = parse_backup_log(group_log_path).get('status')
                 if st in ('success', 'failed', 'partial', 'aborted'):
                     job_status = st
-            if not job_status:
-                seen_status = set()
-                for lp in all_log_paths:
-                    st = parse_backup_log(lp).get('status')
-                    if st in ('success', 'failed', 'partial', 'aborted'):
-                        seen_status.add(st)
-                if 'failed' in seen_status or 'aborted' in seen_status:
-                    job_status = 'failed'
-                elif 'partial' in seen_status:
-                    job_status = 'partial'
-                else:
-                    job_status = 'success'
-            # IMPORTANT: a group log can say "Backup Completed" while individual
-            # accounts still failed (their item logs contain [ERROR] lines). If we
-            # collected ANY errors, the job is NOT fully successful — downgrade
-            # 'success' to 'partial'. (A fully failed job would already have
-            # group/item status 'failed', which is preserved above.)
+            # Item logs are MORE specific than the group log: a group can say
+            # "Backup Completed" while individual accounts aborted/failed.
+            seen_status = set()
+            for lp in all_log_paths:
+                st = parse_backup_log(lp).get('status')
+                if st in ('success', 'failed', 'partial', 'aborted'):
+                    seen_status.add(st)
+            # If the group log is empty/missing, fall back to the most severe
+            # item status. If the group says success but items show otherwise,
+            # the items win (they reflect the actual per-account result).
+            if 'aborted' in seen_status:
+                job_status = 'aborted'
+            elif 'failed' in seen_status:
+                job_status = 'failed'
+            elif 'partial' in seen_status:
+                job_status = 'partial'
+            elif not job_status:
+                job_status = 'success'
+            # IMPORTANT: if we collected ANY per-account errors, the job is NOT
+            # fully successful even if logs say otherwise — but only downgrade
+            # when there is no stronger signal (aborted/failed already win above).
             if user_errors and job_status == 'success':
                 job_status = 'partial'
             info['status'] = job_status
