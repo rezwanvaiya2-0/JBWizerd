@@ -424,6 +424,13 @@ def get_backup_report():
                     job_status = 'partial'
                 else:
                     job_status = 'success'
+            # IMPORTANT: a group log can say "Backup Completed" while individual
+            # accounts still failed (their item logs contain [ERROR] lines). If we
+            # collected ANY errors, the job is NOT fully successful — downgrade
+            # 'success' to 'partial'. (A fully failed job would already have
+            # group/item status 'failed', which is preserved above.)
+            if user_errors and job_status == 'success':
+                job_status = 'partial'
             info['status'] = job_status
 
         log_error("chose backup job: id={} ended={} users={} start={}".format(
