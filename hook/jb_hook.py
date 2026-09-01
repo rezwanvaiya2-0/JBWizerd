@@ -360,7 +360,12 @@ def get_backup_report():
         dest = ''
         for lp in all_log_paths:
             parsed = parse_backup_log(lp)
-            acct = item_accounts.get(lp, '') or parsed.get('cpanel_user', '')
+            # Group log errors are job-level, NOT per-account — attribute them
+            # to 'System' so they don't falsely flag the first account that
+            # happens to appear in the group log. Item logs use their
+            # authoritative account mapping from listQueueItems.
+            is_group = lp == group_log_path
+            acct = item_accounts.get(lp, '') or ('System' if is_group else parsed.get('cpanel_user', ''))
             if parsed.get('error_log'):
                 if not acct:
                     acct = 'System'
@@ -379,11 +384,14 @@ def get_backup_report():
                 for l in local_lines:
                     if l not in bucket:
                         bucket.append(l)
-                # the account tied to THIS log had errors → report it
-                for u in (parsed.get('cpanel_user') or acct).split(','):
-                    u = u.strip()
-                    if u and u not in failed_users:
-                        failed_users.append(u)
+                # Only per-account item logs mark a user as FAILED. Group-level
+                # errors ('System') are job errors and never name a specific
+                # account as failed.
+                if not is_group:
+                    for u in (parsed.get('cpanel_user') or acct).split(','):
+                        u = u.strip()
+                        if u and u not in failed_users:
+                            failed_users.append(u)
             if parsed.get('destination') and not dest:
                 dest = parsed['destination']
             if not info['start_time'] and parsed.get('start_time'):
