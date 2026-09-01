@@ -358,40 +358,45 @@ def get_backup_report():
         user_errors = {}
         failed_users = []
         dest = ''
+        # The group log aggregates EVERYTHING — its [ERROR] lines are the same
+        # as the item logs. If we have item logs, skip the group log's errors
+        # to avoid duplicating them under 'System'. Only use group-log errors
+        # when we have no item logs (glab-only fallback).
+        has_item_logs = any(l != group_log_path for l in all_log_paths)
         for lp in all_log_paths:
             parsed = parse_backup_log(lp)
-            # Group log errors are job-level, NOT per-account — attribute them
-            # to 'System' so they don't falsely flag the first account that
-            # happens to appear in the group log. Item logs use their
-            # authoritative account mapping from listQueueItems.
             is_group = lp == group_log_path
-            acct = item_accounts.get(lp, '') or ('System' if is_group else parsed.get('cpanel_user', ''))
             if parsed.get('error_log'):
-                if not acct:
-                    acct = 'System'
-                # dedup within this log (ignore PID prefix)
-                seen_local = set()
-                local_lines = []
-                for l in parsed['error_log'].split('\n'):
-                    l = l.strip()
-                    if not l:
-                        continue
-                    norm = re.sub(r'^\[PID \d+\]\s*', '', l)
-                    if norm not in seen_local:
-                        seen_local.add(norm)
-                        local_lines.append(l)
-                bucket = user_errors.setdefault(acct, [])
-                for l in local_lines:
-                    if l not in bucket:
-                        bucket.append(l)
-                # Only per-account item logs mark a user as FAILED. Group-level
-                # errors ('System') are job errors and never name a specific
-                # account as failed.
-                if not is_group:
-                    for u in (parsed.get('cpanel_user') or acct).split(','):
-                        u = u.strip()
-                        if u and u not in failed_users:
-                            failed_users.append(u)
+                # Skip the group log's error lines — they duplicate the item logs.
+                if is_group and has_item_logs:
+                    pass
+                else:
+                    acct = item_accounts.get(lp, '') or ('System' if is_group else parsed.get('cpanel_user', ''))
+                    if not acct:
+                        acct = 'System'
+                    # dedup within this log (ignore PID prefix)
+                    seen_local = set()
+                    local_lines = []
+                    for l in parsed['error_log'].split('\n'):
+                        l = l.strip()
+                        if not l:
+                            continue
+                        norm = re.sub(r'^\[PID \d+\]\s*', '', l)
+                        if norm not in seen_local:
+                            seen_local.add(norm)
+                            local_lines.append(l)
+                    bucket = user_errors.setdefault(acct, [])
+                    for l in local_lines:
+                        if l not in bucket:
+                            bucket.append(l)
+                    # Only per-account item logs mark a user as FAILED. Group-level
+                    # errors ('System') are job errors and never name a specific
+                    # account as failed.
+                    if not is_group:
+                        for u in (parsed.get('cpanel_user') or acct).split(','):
+                            u = u.strip()
+                            if u and u not in failed_users:
+                                failed_users.append(u)
             if parsed.get('destination') and not dest:
                 dest = parsed['destination']
             if not info['start_time'] and parsed.get('start_time'):
