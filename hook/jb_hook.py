@@ -416,36 +416,48 @@ def get_backup_report():
 
         info['destination'] = dest
 
-        # Status: if the job has finished, use the GROUP finalize log status
-        # (authoritative job result). If unavailable, use the MOST SEVERE
-        # status found across the item logs (failed/aborted > partial > success).
+        # Status: the GROUP finalize log is the AUTHORITATIVE job-level result
+        # (e.g. "Backup Partially Completed" = partial even if one account's
+        # item log says "Backup Failed"). Item logs only fill the gap when:
+        #   - the group log is missing/empty, OR
+        #   - the group log falsely says "success" while accounts actually had
+        #     errors (we then downgrade to the most severe item status).
         if job_ended:
             job_status = ''
             if group_log_path:
                 st = parse_backup_log(group_log_path).get('status')
                 if st in ('success', 'failed', 'partial', 'aborted'):
                     job_status = st
-            # Item logs are MORE specific than the group log: a group can say
-            # "Backup Completed" while individual accounts aborted/failed.
-            seen_status = set()
-            for lp in all_log_paths:
-                st = parse_backup_log(lp).get('status')
-                if st in ('success', 'failed', 'partial', 'aborted'):
-                    seen_status.add(st)
-            # If the group log is empty/missing, fall back to the most severe
-            # item status. If the group says success but items show otherwise,
-            # the items win (they reflect the actual per-account result).
-            if 'aborted' in seen_status:
-                job_status = 'aborted'
-            elif 'failed' in seen_status:
-                job_status = 'failed'
-            elif 'partial' in seen_status:
-                job_status = 'partial'
-            elif not job_status:
-                job_status = 'success'
+
+            if job_status in ('partial', 'failed', 'aborted'):
+                # Job-level result is authoritative — never overridden by a
+                # single account's item log.
+                pass
+            else:
+                # Group log missing OR says "success": consult item logs.
+                seen_status = set()
+                for lp in all_log_paths:
+                    st = parse_backup_log(lp).get('status')
+                    if st in ('success', 'failed', 'partial', 'aborted'):
+                        seen_status.add(st)
+                if not job_status:
+                    if 'aborted' in seen_status:
+                        job_status = 'aborted'
+                    elif 'failed' in seen_status:
+                        job_status = 'failed'
+                    elif 'partial' in seen_status:
+                        job_status = 'partial'
+                    else:
+                        job_status = 'success'
+                else:  # group said success but items show otherwise
+                    if 'aborted' in seen_status:
+                        job_status = 'aborted'
+                    elif 'failed' in seen_status:
+                        job_status = 'failed'
+                    elif 'partial' in seen_status:
+                        job_status = 'partial'
             # IMPORTANT: if we collected ANY per-account errors, the job is NOT
-            # fully successful even if logs say otherwise — but only downgrade
-            # when there is no stronger signal (aborted/failed already win above).
+            # fully successful — downgrade 'success' to 'partial'.
             if user_errors and job_status == 'success':
                 job_status = 'partial'
             info['status'] = job_status
