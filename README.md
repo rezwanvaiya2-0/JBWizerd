@@ -87,6 +87,7 @@ A `Dockerfile` and `docker-compose.yml` are included for running the whole panel
 - `Dockerfile` — PHP 8.2 + Apache with `pdo_mysql`, `curl`, `mbstring`, `zip`; enables `rewrite`/`headers` (needed for the `.htaccess` security rules) and passes the `Authorization` header through to PHP so the hook's Bearer token auth works.
 - `docker/docker-entrypoint.sh` — writes `includes/config.php` automatically from environment variables (DB, panel URL, registration key, timezone, retention, security), installs the cron jobs (webhook sender every minute, retention cleanup daily at 03:00), then starts Apache.
 - `docker-compose.yml` — MySQL 8.0 service with a healthcheck, pre-seeded from `install.sql`, plus the web service.
+- **Persistent database** — MySQL data is stored on the host in `./mysql-data`, so rebuilding or reinstalling the containers never loses data (see `DOCKER.md`).
 
 **Environment variables** (all optional — sensible defaults are used):
 

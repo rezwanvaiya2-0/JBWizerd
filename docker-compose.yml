@@ -3,8 +3,9 @@
 #
 #   docker compose up -d --build
 #
-#   Web:  http://localhost:8080   (setup.php runs first-time)
-#   DB:   mysql://jbuser:jbpass@db:3306/jbwizerd
+#   Web:         http://localhost:8080   (setup.php runs first-time)
+#   phpMyAdmin:  http://localhost:8081   (database manager)
+#   DB:          mysql://jbuser:jbpass@db:3306/jbwizerd
 #
 # After startup, open http://localhost:8080/setup.php and point the
 # installer at:
@@ -25,14 +26,35 @@ services:
       MYSQL_USER: jbuser
       MYSQL_PASSWORD: jbpass
     volumes:
-      - db_data:/var/lib/mysql
-      # Optionally pre-seed the schema on first boot:
+      # MySQL data lives on the host at ./mysql-data (persistent storage).
+      # It survives container rebuilds, `docker compose down` and even
+      # `docker compose down -v` — the database is only lost if you
+      # delete the ./mysql-data folder manually.
+      - ./mysql-data:/var/lib/mysql
+      # Pre-seed the schema on first boot (only when mysql-data is empty):
       - ./install.sql:/docker-entrypoint-initdb.d/01-install.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpass"]
       interval: 10s
       timeout: 5s
       retries: 10
+
+  phpmyadmin:
+    image: phpmyadmin:5
+    container_name: jbwizerd_phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_ARBITRARY: "0"
+      PMA_USER: root
+      PMA_PASSWORD: rootpass
+      UPLOAD_LIMIT: 128M
+    ports:
+      - "8081:80"
 
   web:
     build: .
@@ -54,6 +76,3 @@ services:
       # Port inside the container is always 80; the host port is below.
     ports:
       - "8080:80"
-
-volumes:
-  db_data:

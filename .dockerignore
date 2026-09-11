@@ -9,3 +9,4 @@ JBWizerd.jpg
 *.log
 cron/cron-status.json
 includes/config.php
+mysql-data/
